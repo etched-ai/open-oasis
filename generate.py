@@ -27,6 +27,9 @@ vae = vae.to(device).eval()
 
 # sampling params
 B = 1
+# decode frames in batches for lesser powerful GPUs
+frame_decode_batch_size=4
+# total_frames *must* be a multiple of frame_decode_batch_size
 total_frames = 32
 max_noise_level = 1000
 ddim_noise_steps = 100
@@ -108,7 +111,7 @@ for i in tqdm(range(n_prompt_frames, total_frames)):
 # vae decoding
 x = rearrange(x, "b t c h w -> (b t) (h w) c")
 with torch.no_grad():
-    x = (vae.decode(x / scaling_factor) + 1) / 2
+    x = torch.cat([(vae.decode(x[i:i+frame_decode_batch_size] / scaling_factor) + 1) / 2 for i in tqdm(range(0,total_frames,frame_decode_batch_size))],0)
 x = rearrange(x, "(b t) c h w -> b t h w c", t=total_frames)
 
 # save video
