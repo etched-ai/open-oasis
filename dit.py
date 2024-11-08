@@ -295,27 +295,39 @@ class DiT(nn.Module):
         x: (B, T, C, H, W) tensor of spatial inputs (images or latent representations of images)
         t: (B, T,) tensor of diffusion timesteps
         """
-
         B, T, C, H, W = x.shape
 
-        # add spatial embeddings
-        x = rearrange(x, "b t c h w -> (b t) c h w")
-        x = self.x_embedder(x)  # (B*T, C, H, W) -> (B*T, H/2, W/2, D) , C = 16, D = d_model
-        # restore shape
-        x = rearrange(x, "(b t) h w d -> b t h w d", t=T)
-        # embed noise steps
-        t = rearrange(t, "b t -> (b t)")
-        c = self.t_embedder(t)  # (N, D)
-        c = rearrange(c, "(b t) d -> b t d", t=T)
-        if torch.is_tensor(external_cond):
+        # Flatten batch and time dimensions
+        x = x.view(B * T, C, H, W)           # (B*T, C, H, W)
+        x = self.x_embedder(x)               # (B*T, H/2, W/2, D)
+        _, h, w, D = x.shape                 # Update h, w, D after embedding
+
+        # Restore batch and time dimensions
+        x = x.view(B, T, h, w, D)            # (B, T, h, w, D)
+
+        # Embed noise steps
+        t = t.reshape(B * T)                 # (B*T,)
+        c = self.t_embedder(t)               # (B*T, D)
+        c = c.view(B, T, D)                  # (B, T, D)
+        
+        if external_cond is not None:
+
             c += self.external_cond(external_cond)
+
+        # Pass through transformer blocks
         for block in self.blocks:
-            x = block(x, c)  # (N, T, H, W, D)
-        x = self.final_layer(x, c)  # (N, T, H, W, patch_size ** 2 * out_channels)
-        # unpatchify
-        x = rearrange(x, "b t h w d -> (b t) h w d")
-        x = self.unpatchify(x)  # (N, out_channels, H, W)
-        x = rearrange(x, "(b t) c h w -> b t c h w", t=T)
+            x = block(x, c)                  # (B, T, h, w, D)
+
+        # Final layer
+        x = self.final_layer(x, c)           # (B, T, h, w, d)
+
+        # Flatten batch and time dimensions for unpatchify
+        x = x.view(B * T, h, w, -1)          # (B*T, h, w, d)
+        x = self.unpatchify(x)               # (B*T, out_channels, H, W)
+
+        # Restore batch and time dimensions
+        x = x.view(B, T, -1, H, W)           # (B, T, out_channels, H, W)
+
 
         return x
 
@@ -328,5 +340,7 @@ def DiT_S_2():
         num_heads=16,
     )
 
+DiT_models = {
+    "DiT-S/2": DiT_S_2
+}
 
-DiT_models = {"DiT-S/2": DiT_S_2}

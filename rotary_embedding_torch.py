@@ -3,11 +3,10 @@ Adapted from https://github.com/lucidrains/rotary-embedding-torch/blob/main/rota
 """
 
 from __future__ import annotations
-from math import pi, log
+from math import pi
 
 import torch
-from torch.nn import Module, ModuleList
-from torch.amp import autocast
+from torch.nn import Module
 from torch import nn, einsum, broadcast_tensors, Tensor
 
 from einops import rearrange, repeat
@@ -43,8 +42,7 @@ def rotate_half(x):
     return rearrange(x, "... d r -> ... (d r)")
 
 
-@autocast("cuda", enabled=False)
-def apply_rotary_emb(freqs, t, start_index=0, scale=1.0, seq_dim=-2):
+def apply_rotary_emb(freqs, t, start_index = 0, scale = 1., seq_dim = -2):
     dtype = t.dtype
 
     if t.ndim == 3:
@@ -82,8 +80,6 @@ def apply_learned_rotations(rotations, t, start_index=0, freq_ranges=None):
 
 
 # classes
-
-
 class RotaryEmbedding(Module):
     def __init__(
         self,
@@ -130,8 +126,11 @@ class RotaryEmbedding(Module):
         self.cache_if_possible = cache_if_possible
         self.cache_max_seq_len = cache_max_seq_len
 
-        self.register_buffer("cached_freqs", torch.zeros(cache_max_seq_len, dim), persistent=False)
-        self.register_buffer("cached_freqs_seq_len", torch.tensor(0), persistent=False)
+        self.register_buffer('cached_freqs', torch.zeros(cache_max_seq_len, dim), persistent = False)
+        #self.register_buffer('cached_freqs_seq_len', torch.tensor(0), persistent = False)
+
+        self.cached_freqs_seq_len = 0
+
 
         self.learned_freq = learned_freq
 
@@ -285,18 +284,33 @@ class RotaryEmbedding(Module):
         all_freqs = broadcast_tensors(*all_freqs)
         return torch.cat(all_freqs, dim=-1)
 
-    @autocast("cuda", enabled=False)
-    def forward(self, t: Tensor, freqs: Tensor, seq_len=None, offset=0):
-        should_cache = self.cache_if_possible and not self.learned_freq and exists(seq_len) and self.freqs_for != "pixel" and (offset + seq_len) <= self.cache_max_seq_len
+    def forward(
+            self,
+            t: Tensor,
+            freqs: Tensor,
+            seq_len=None,
+            offset=0
+    ):
+        should_cache = (
+                self.cache_if_possible and
+                not self.learned_freq and
+                exists(seq_len) and
+                self.freqs_for != 'pixel' and
+                (offset + seq_len) <= self.cache_max_seq_len
+        )
 
-        if should_cache and exists(self.cached_freqs) and (offset + seq_len) <= self.cached_freqs_seq_len.item():
-            return self.cached_freqs[offset : (offset + seq_len)].detach()
+        if (
+                should_cache and \
+                exists(self.cached_freqs) and \
+                (offset + seq_len) <= self.cached_freqs_seq_len
+        ):
+            return self.cached_freqs[offset:(offset + seq_len)].detach()
 
-        freqs = einsum("..., f -> ... f", t.type(freqs.dtype), freqs)
-        freqs = repeat(freqs, "... n -> ... (n r)", r=2)
+        freqs = einsum('..., f -> ... f', t.type(freqs.dtype), freqs)
+        freqs = repeat(freqs, '... n -> ... (n r)', r=2)
 
         if should_cache and offset == 0:
             self.cached_freqs[:seq_len] = freqs.detach()
-            self.cached_freqs_seq_len.copy_(seq_len)
+            self.cached_freqs_seq_len = seq_len  # Updated line
 
         return freqs
